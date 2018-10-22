@@ -3,23 +3,51 @@ package main
 import (
     "fmt"
     "io/ioutil"
-    "log"
     "strconv"
     "sort"
     "text/tabwriter"
     "os"
+    "bufio"
+    "strings"
+    "bytes"
+    "os/exec"
 )
 
+func check(e error){
+    if e != nil {
+        panic(e)
+    }
+}
+
+func get_user(uid_line string) string {
+    var out bytes.Buffer
+    var err error
+    words := strings.Fields(uid_line)
+    getentCmd := exec.Command("getent", "passwd", words[1])
+    cutCmd := exec.Command("cut", "-d:", "-f1")
+    cutCmd.Stdin, err = getentCmd.StdoutPipe()
+    check(err)
+    cutCmd.Stdout = &out
+    err = cutCmd.Start()
+    check(err)
+    err = getentCmd.Run()
+    check(err)
+    err = cutCmd.Wait()
+    return strings.TrimSuffix(out.String(), "\n")
+}
+
 func main(){
+    // slices for storing /proc PID dirs
     procDir := make([]int64,0)
     procStr := make([]string, 0)
+
+    // tab writer
     w := new(tabwriter.Writer)
     w.Init(os.Stdout, 8, 8, 0, '\t', 0)
+
     // gets all files in directory /proc
     files, err := ioutil.ReadDir("/proc")
-    if err != nil {
-        log.Fatal(err)
-    }
+    check(err)
 
     // adds all files that are numbers in files to procDir slice
     for _,file := range(files) {
@@ -42,8 +70,19 @@ func main(){
                 "USER", "PID", "%CPU", "%MEM", "VSZ", "RSS", "TTY", "STAT", "START", "TIME", "COMMAND")
 
     for _, PID := range(procStr) {
+	fileHandle, err := os.Open("/proc/" + PID + "/status")
+	check(err)
+	scanner := bufio.NewScanner(fileHandle)
+	var user string
+	for scanner.Scan() {
+	    if strings.HasPrefix(scanner.Text(), "Uid:") {
+		// get uid from line and uses getent to get user id
+		user = get_user(scanner.Text())
+	    }
+	}
+
         fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t\n",
-                    "", PID, "", "", "", "", "", "", "", "", "")
+                    user, PID, "", "", "", "", "", "", "", "", "")
     }
 
 }
