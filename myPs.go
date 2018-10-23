@@ -41,6 +41,18 @@ func get_user(uid_line string, uids map[string] string) string {
     return uid
 }
 
+func get_total_mem() float64 {
+    meminfo, err := os.Open("/proc/meminfo")
+    check(err)
+    scanner := bufio.NewScanner(meminfo)
+    scanner.Scan()
+    firstLine := scanner.Text()
+    toks := strings.Fields(firstLine)
+    totalMem, err := strconv.ParseFloat(toks[1], 64)
+    check(err)
+    return totalMem
+}
+
 func main(){
     // slices for storing /proc PID dirs
     procDir := make([]int64,0)
@@ -75,16 +87,11 @@ func main(){
                 "USER", "PID", "%CPU", "%MEM", "VSZ", "RSS", "TTY", "STAT", "START", "TIME", "COMMAND")
 
     uids := map[string]string{"initial": "0"}
-    meminfo, err := os.Open("/proc/meminfo")
-    check(err)
-    scanner := bufio.NewScanner(meminfo)
-    scanner.Scan()
-    firstLine := scanner.Text()
-    toks := strings.Fields(firstLine)
-    totalMem, err := strconv.ParseFloat(toks[1], 64)
-    check(err)
+    totalMem := get_total_mem()
+
     for _, PID := range(procStr) {
 	user := ""
+	state := ""
 	vsz := 0.0
 	rss := 0.0
 	memUse := 0.0
@@ -107,12 +114,16 @@ func main(){
                 rss, err = strconv.ParseFloat(words[1], 64)
 		check(err)
 	    }
+	    if strings.HasPrefix(inputLine, "State:") {
+	        words := strings.Fields(inputLine)
+                state = words[1]
+	    }
 	}
 
         memUse = (rss / totalMem) * 100
 
         fmt.Fprintf(w, "%s\t%s\t%s\t%.1f\t%.0f\t%.0f\t%s\t%s\t%s\t%s\t%s\t\n",
-                    user, PID, "", memUse, vsz, rss, "", "", "", "", "")
+                    user, PID, "", memUse, vsz, rss, "", state, "", "", "")
     }
 
 }
