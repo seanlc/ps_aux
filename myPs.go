@@ -19,21 +19,26 @@ func check(e error){
     }
 }
 
-func get_user(uid_line string) string {
+func get_user(uid_line string, uids map[string] string) string {
     var out bytes.Buffer
     var err error
     words := strings.Fields(uid_line)
-    getentCmd := exec.Command("getent", "passwd", words[1])
-    cutCmd := exec.Command("cut", "-d:", "-f1")
-    cutCmd.Stdin, err = getentCmd.StdoutPipe()
-    check(err)
-    cutCmd.Stdout = &out
-    err = cutCmd.Start()
-    check(err)
-    err = getentCmd.Run()
-    check(err)
-    err = cutCmd.Wait()
-    return strings.TrimSuffix(out.String(), "\n")
+    uid, prs := uids[words[1]]
+    if prs == false {
+        getentCmd := exec.Command("getent", "passwd", words[1])
+        cutCmd := exec.Command("cut", "-d:", "-f1")
+        cutCmd.Stdin, err = getentCmd.StdoutPipe()
+        check(err)
+        cutCmd.Stdout = &out
+        err = cutCmd.Start()
+        check(err)
+        err = getentCmd.Run()
+        check(err)
+        err = cutCmd.Wait()
+        uid = strings.TrimSuffix(out.String(), "\n")
+	uids[words[1]] = uid
+    }
+    return uid
 }
 
 func main(){
@@ -69,20 +74,45 @@ func main(){
     fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t\n",
                 "USER", "PID", "%CPU", "%MEM", "VSZ", "RSS", "TTY", "STAT", "START", "TIME", "COMMAND")
 
+    uids := map[string]string{"initial": "0"}
+    meminfo, err := os.Open("/proc/meminfo")
+    check(err)
+    scanner := bufio.NewScanner(meminfo)
+    scanner.Scan()
+    firstLine := scanner.Text()
+    toks := strings.Fields(firstLine)
+    totalMem, err := strconv.ParseFloat(toks[1], 64)
+    check(err)
     for _, PID := range(procStr) {
-	fileHandle, err := os.Open("/proc/" + PID + "/status")
+	user := ""
+	vsz := 0.0
+	rss := 0.0
+	memUse := 0.0
+	status, err := os.Open("/proc/" + PID + "/status")
 	check(err)
-	scanner := bufio.NewScanner(fileHandle)
-	var user string
+	scanner := bufio.NewScanner(status)
 	for scanner.Scan() {
-	    if strings.HasPrefix(scanner.Text(), "Uid:") {
+	    inputLine := scanner.Text()
+	    if strings.HasPrefix(inputLine, "Uid:") {
 		// get uid from line and uses getent to get user id
-		user = get_user(scanner.Text())
+		user = get_user(inputLine, uids)
+	    }
+	    if strings.HasPrefix(inputLine, "VmSize:") {
+		words := strings.Fields(inputLine)
+		vsz, err = strconv.ParseFloat(words[1], 64)
+		check(err)
+	    }
+	    if strings.HasPrefix(inputLine, "VmRSS:") {
+	        words := strings.Fields(inputLine)
+                rss, err = strconv.ParseFloat(words[1], 64)
+		check(err)
 	    }
 	}
 
-        fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t\n",
-                    user, PID, "", "", "", "", "", "", "", "", "")
+        memUse = (rss / totalMem) * 100
+
+        fmt.Fprintf(w, "%s\t%s\t%s\t%.1f\t%.0f\t%.0f\t%s\t%s\t%s\t%s\t%s\t\n",
+                    user, PID, "", memUse, vsz, rss, "", "", "", "", "")
     }
 
 }
