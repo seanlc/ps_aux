@@ -92,7 +92,6 @@ func parse_stat(pid string, statContents *[]string) {
 	}
 	*statContents = append(*statContents, str[:len(str)-1])
     }
-    fmt.Println(*statContents)
 }
 
 func get_total_mem() float64 {
@@ -115,6 +114,8 @@ func main(){
     var statContents[]string
     const stateIndex = 2
     const ttyIndex = 6
+    const utimeIndex = 13
+    const stimeIndex = 14
     parse_stat("1", &statContents)
 
     // tab writer
@@ -156,9 +157,23 @@ func main(){
 	vsz := 0.0
 	rss := 0.0
 	memUse := 0.0
+	totalTime := ""
+
 	parse_stat(PID, &statContents)
-	fmt.Println(statContents)
+
+	// state calculation
 	state = statContents[stateIndex]
+
+	// time calculation
+	userTime,err := strconv.Atoi(statContents[utimeIndex])
+	systemTime,err := strconv.Atoi(statContents[stimeIndex])
+	minTimeInt := ((userTime + systemTime) / 100) / 60
+	secTimeInt := ((userTime + systemTime) / 100) % 60
+	minTime := strconv.Itoa(minTimeInt)
+	secTime := strconv.Itoa(secTimeInt)
+	totalTime = minTime + ":" + secTime
+
+	// tty calculation
 	i64,err := strconv.ParseInt(statContents[ttyIndex], 10, 32)
 	check(err)
 	minor_tty := (int32(i64) >> 8) & 0xFF
@@ -166,9 +181,6 @@ func main(){
 	major_tty0 := int32(i64) & 0xFF
 	major_tty := major_tty1 + major_tty0
 	major_tty_str = strconv.Itoa(int(major_tty))
-	fmt.Println("tty value:")
-	fmt.Println(minor_tty)
-	fmt.Println(major_tty)
 
 	if minor_tty == 136 {
 	    tty += "pts/"
@@ -207,7 +219,7 @@ func main(){
         memUse = (rss / totalMem) * 100
 
         fmt.Fprintf(w, "%s\t%s\t%s\t%.1f\t%.0f\t%.0f\t%s\t%s\t%s\t%s\t%s\t\n",
-                    user, PID, "", memUse, vsz, rss, tty, state, "", "", "")
+                    user, PID, "", memUse, vsz, rss, tty, state, "", totalTime, "")
         statContents = nil
     }
 }
