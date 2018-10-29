@@ -41,8 +41,7 @@ func get_user(uid_line string, uids map[string] string) string {
     return uid
 }
 
-func parse_stat(pid string) {
-    var statContents []string
+func parse_stat(pid string, statContents *[]string) {
     var pNameParts []string
     var pName string
     var numCloseParen int
@@ -56,7 +55,7 @@ func parse_stat(pid string) {
     // read PID and add to statContents
     first,err := reader.ReadString(' ')
     check(err)
-    statContents = append(statContents, first)
+    *statContents = append(*statContents, first[:len(first)-1])
 
     // find number of closing parenthesis
     for {
@@ -72,7 +71,7 @@ func parse_stat(pid string) {
     for _,tok := range pNameParts {
         pName += tok
     }
-    statContents = append(statContents, pName)
+    *statContents = append(*statContents, pName)
 
     // rewind file to beginning
     stat.Seek(0, 0)
@@ -84,15 +83,16 @@ func parse_stat(pid string) {
     }
 
     // parse remaining fields with space as delim and store in statContent slice
+    _, err = reader.ReadString(' ')
+    check(err)
     for {
 	str,err := reader.ReadString(' ')
 	if err != nil {
 	    break
 	}
-	statContents = append(statContents, str)
+	*statContents = append(*statContents, str[:len(str)-1])
     }
-
-    fmt.Println(statContents)
+    fmt.Println(*statContents)
 }
 
 func get_total_mem() float64 {
@@ -109,10 +109,13 @@ func get_total_mem() float64 {
 }
 
 func main(){
-    parse_stat("1")
     // slices for storing /proc PID dirs
     procDir := make([]int64,0)
     procStr := make([]string, 0)
+    var statContents[]string
+    const stateIndex = 2
+    const ttyIndex = 6
+    parse_stat("1", &statContents)
 
     // tab writer
     w := new(tabwriter.Writer)
@@ -148,9 +151,37 @@ func main(){
     for _, PID := range(procStr) {
 	user := ""
 	state := ""
+	major_tty_str := ""
+	tty := ""
 	vsz := 0.0
 	rss := 0.0
 	memUse := 0.0
+	parse_stat(PID, &statContents)
+	fmt.Println(statContents)
+	state = statContents[stateIndex]
+	i64,err := strconv.ParseInt(statContents[ttyIndex], 10, 32)
+	check(err)
+	minor_tty := (int32(i64) >> 8) & 0xFF
+	major_tty1 := (int32(i64) >> 12) & 0xFFF00
+	major_tty0 := int32(i64) & 0xFF
+	major_tty := major_tty1 + major_tty0
+	major_tty_str = strconv.Itoa(int(major_tty))
+	fmt.Println("tty value:")
+	fmt.Println(minor_tty)
+	fmt.Println(major_tty)
+
+	if minor_tty == 136 {
+	    tty += "pts/"
+	} else if minor_tty == 4 {
+            tty += "tty" 
+	} else {
+	    tty += "?"
+        }
+
+	if major_tty_str != "0" {
+            tty += major_tty_str
+        }
+
 	// TODO: rewrite use info from /proc/PID/stat instead of /proc/PID/status
 	status, err := os.Open("/proc/" + PID + "/status")
 	defer status.Close()
@@ -171,15 +202,12 @@ func main(){
                 rss, err = strconv.ParseFloat(words[1], 64)
 		check(err)
 	    }
-	    if strings.HasPrefix(inputLine, "State:") {
-	        words := strings.Fields(inputLine)
-                state = words[1]
-	    }
 	}
 
         memUse = (rss / totalMem) * 100
 
         fmt.Fprintf(w, "%s\t%s\t%s\t%.1f\t%.0f\t%.0f\t%s\t%s\t%s\t%s\t%s\t\n",
-                    user, PID, "", memUse, vsz, rss, "", state, "", "", "")
+                    user, PID, "", memUse, vsz, rss, tty, state, "", "", "")
+        statContents = nil
     }
 }
