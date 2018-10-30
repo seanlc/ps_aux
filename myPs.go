@@ -107,6 +107,19 @@ func get_total_mem() float64 {
     return totalMem
 }
 
+func get_system_uptime() float64 {
+    uptime,err := os.Open("/proc/uptime")
+    check(err)
+    defer uptime.Close()
+    scanner := bufio.NewScanner(uptime)
+    scanner.Scan()
+    firstLine := scanner.Text()
+    toks := strings.Fields(firstLine)
+    totalTime,err := strconv.ParseFloat(toks[0], 64)
+    check(err)
+    return totalTime
+}
+
 func main(){
     // slices for storing /proc PID dirs
     procDir := make([]int64,0)
@@ -116,6 +129,7 @@ func main(){
     const ttyIndex = 6
     const utimeIndex = 13
     const stimeIndex = 14
+    const startTimeIndex = 21
     parse_stat("1", &statContents)
 
     // tab writer
@@ -148,6 +162,9 @@ func main(){
 
     uids := map[string]string{"initial": "0"}
     totalMem := get_total_mem()
+
+    // system uptime calc
+    sysUptimeSecs := get_system_uptime()
 
     for _, PID := range(procStr) {
 	user := ""
@@ -194,6 +211,11 @@ func main(){
             tty += major_tty_str
         }
 
+	// %CPU calc
+	procStartTimeTicks,err := strconv.ParseFloat(statContents[startTimeIndex], 64)
+	procStartTimeSecs := sysUptimeSecs - (procStartTimeTicks / 100.0)
+	cpuPercentage := ((float64(userTime) + float64(systemTime)) / procStartTimeSecs)
+
 	// TODO: rewrite use info from /proc/PID/stat instead of /proc/PID/status
 	status, err := os.Open("/proc/" + PID + "/status")
 	defer status.Close()
@@ -218,8 +240,8 @@ func main(){
 
         memUse = (rss / totalMem) * 100
 
-        fmt.Fprintf(w, "%s\t%s\t%s\t%.1f\t%.0f\t%.0f\t%s\t%s\t%s\t%s\t%s\t\n",
-                    user, PID, "", memUse, vsz, rss, tty, state, "", totalTime, "")
+        fmt.Fprintf(w, "%s\t%s\t%.1f\t%.1f\t%.0f\t%.0f\t%s\t%s\t%s\t%s\t%s\t\n",
+                    user, PID, cpuPercentage, memUse, vsz, rss, tty, state, "", totalTime, "")
         statContents = nil
     }
 }
