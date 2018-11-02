@@ -107,6 +107,28 @@ func get_parm_from_file(fName string, pIndex int) float64 {
     return parm
 }
 
+func get_command(PID string, fName string) string {
+    cmdline := ""
+    cmd,err := os.Open("/proc/" + PID + "/cmdline")
+    check(err)
+    defer cmd.Close()
+    scanner := bufio.NewScanner(cmd)
+    scanner.Scan()
+    firstLine := scanner.Text()
+    if firstLine != "" {
+	if len(firstLine) > 40 {
+	    cmdline = firstLine[0: 39]
+        } else {
+	    cmdline = firstLine
+        }
+    } else {
+        cmdline = fName
+	cmdline = strings.Replace(cmdline, "(", "[", -1)
+	cmdline = strings.Replace(cmdline, ")", "]", -1)
+    }
+    return cmdline
+}
+
 func main(){
     // slices for storing /proc PID dirs
     procDir := make([]int64,0)
@@ -117,6 +139,7 @@ func main(){
     const utimeIndex = 13
     const stimeIndex = 14
     const startTimeIndex = 21
+    const fNameIndex = 1
     parse_stat("1", &statContents)
 
     // tab writer
@@ -162,6 +185,7 @@ func main(){
 	rss := 0.0
 	memUse := 0.0
 	totalTime := ""
+	cmdline := ""
 
 	parse_stat(PID, &statContents)
 
@@ -203,6 +227,9 @@ func main(){
 	procStartTimeSecs := sysUptimeSecs - (procStartTimeTicks / 100.0)
 	cpuPercentage := ((float64(userTime) + float64(systemTime)) / procStartTimeSecs)
 
+	// get command
+	cmdline = get_command(PID, statContents[fNameIndex])
+
 	// TODO: rewrite use info from /proc/PID/stat instead of /proc/PID/status
 	status, err := os.Open("/proc/" + PID + "/status")
 	defer status.Close()
@@ -228,7 +255,7 @@ func main(){
         memUse = (rss / totalMem) * 100
 
         fmt.Fprintf(w, "%s\t%s\t%.1f\t%.1f\t%.0f\t%.0f\t%s\t%s\t%s\t%s\t%s\t\n",
-                    user, PID, cpuPercentage, memUse, vsz, rss, tty, state, "", totalTime, "")
+                    user, PID, cpuPercentage, memUse, vsz, rss, tty, state, "", totalTime, cmdline)
         statContents = nil
     }
 }
