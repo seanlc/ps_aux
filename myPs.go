@@ -94,30 +94,17 @@ func parse_stat(pid string, statContents *[]string) {
     }
 }
 
-func get_total_mem() float64 {
-    meminfo, err := os.Open("/proc/meminfo")
-    defer meminfo.Close()
+func get_parm_from_file(fName string, pIndex int) float64 {
+    file,err := os.Open(fName)
     check(err)
-    scanner := bufio.NewScanner(meminfo)
+    defer file.Close()
+    scanner := bufio.NewScanner(file)
     scanner.Scan()
     firstLine := scanner.Text()
     toks := strings.Fields(firstLine)
-    totalMem, err := strconv.ParseFloat(toks[1], 64)
+    parm,err := strconv.ParseFloat(toks[pIndex], 64)
     check(err)
-    return totalMem
-}
-
-func get_system_uptime() float64 {
-    uptime,err := os.Open("/proc/uptime")
-    check(err)
-    defer uptime.Close()
-    scanner := bufio.NewScanner(uptime)
-    scanner.Scan()
-    firstLine := scanner.Text()
-    toks := strings.Fields(firstLine)
-    totalTime,err := strconv.ParseFloat(toks[0], 64)
-    check(err)
-    return totalTime
+    return parm
 }
 
 func main(){
@@ -161,10 +148,10 @@ func main(){
                 "USER", "PID", "%CPU", "%MEM", "VSZ", "RSS", "TTY", "STAT", "START", "TIME", "COMMAND")
 
     uids := map[string]string{"initial": "0"}
-    totalMem := get_total_mem()
+    totalMem := get_parm_from_file("/proc/meminfo", 1)
 
     // system uptime calc
-    sysUptimeSecs := get_system_uptime()
+    sysUptimeSecs := get_parm_from_file("/proc/uptime", 0)
 
     for _, PID := range(procStr) {
 	user := ""
