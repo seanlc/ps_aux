@@ -19,6 +19,81 @@ func check(e error){
     }
 }
 
+func get_secs_since_midnight() int {
+    secsSince1970,err := exec.Command("date", "+%s").Output()
+    check(err)
+    totalSecsInt,err := strconv.Atoi(strings.TrimSuffix(string(secsSince1970), "\n"))
+    check(err)
+    midnightSecs,err := exec.Command("date", "-d", "today 00:00:00", "+%s").Output()
+    check(err)
+    midnightSecsInt,err := strconv.Atoi(strings.TrimSuffix(string(midnightSecs), "\n"))
+    check(err)
+    return totalSecsInt - midnightSecsInt
+}
+
+func get_current_month() string {
+    month, err := exec.Command("date", "+%b").Output()
+    check(err)
+    return strings.TrimSuffix(string(month), "\n")
+}
+
+func get_current_day() int {
+    day, err := exec.Command("date", "+%d").Output()
+    check(err)
+    dayInt,err := strconv.Atoi(strings.TrimSuffix(string(day), "\n"))
+    check(err)
+    return dayInt
+}
+
+func get_prev_month(month string) string {
+    lastMonth := ""
+    switch month {
+    case "Jan":
+        lastMonth = "Dec"
+    case "Feb":
+        lastMonth = "Jan"
+    case "Mar":
+        lastMonth = "Feb"
+    case "Apr":
+        lastMonth = "Mar"
+    case "May":
+        lastMonth = "Apr"
+    case "Jun":
+        lastMonth = "May"
+    case "Jul":
+        lastMonth = "Jun"
+    case "Aug":
+        lastMonth = "Jul"
+    case "Sep":
+        lastMonth = "Aug"
+    case "Oct":
+        lastMonth = "Sep"
+    case "Nov":
+        lastMonth = "Oct"
+    case "Dec":
+        lastMonth = "Jan"
+    default:
+	lastMonth = "Err"
+    }
+
+    return lastMonth
+}
+
+func dec_day(month *string, day *int) {
+    if *day == 1 {
+        if *month == "May" || *month == "Jul" || *month == "Oct"  || *month == "Dec" {
+	    *day = 30
+	} else if  *month == "Mar" {
+	    *day = 28
+        } else {
+	    *day = 31
+        }
+	*month = get_prev_month(*month)
+    } else {
+        *day = *day - 1
+    }
+}
+
 func get_user(uid_line string, uids map[string] string) string {
     var out bytes.Buffer
     var err error
@@ -129,11 +204,20 @@ func get_command(PID string, fName string) string {
     return cmdline
 }
 
+func pad_time_with_zeroes(num *string) {
+    if len(*num) == 1 {
+        *num = "0" + *num
+    }
+}
+
 func main(){
     // slices for storing /proc PID dirs
     procDir := make([]int64,0)
     procStr := make([]string, 0)
     var statContents[]string
+    origCurMonth := get_current_month()
+    origCurDay := get_current_day()
+    curTime := get_secs_since_midnight()
     const stateIndex = 2
     const ttyIndex = 6
     const utimeIndex = 13
@@ -185,7 +269,11 @@ func main(){
 	rss := 0.0
 	memUse := 0.0
 	totalTime := ""
+	procExeTime := 0
 	cmdline := ""
+	startTime := ""
+	curDay := origCurDay
+	curMonth := origCurMonth
 
 	parse_stat(PID, &statContents)
 
@@ -195,10 +283,13 @@ func main(){
 	// time calculation
 	userTime,err := strconv.Atoi(statContents[utimeIndex])
 	systemTime,err := strconv.Atoi(statContents[stimeIndex])
-	minTimeInt := ((userTime + systemTime) / 100) / 60
-	secTimeInt := ((userTime + systemTime) / 100) % 60
+	procExeTime = (userTime + systemTime) / 100
+	minTimeInt := procExeTime / 60
+	secTimeInt := procExeTime % 60
 	minTime := strconv.Itoa(minTimeInt)
 	secTime := strconv.Itoa(secTimeInt)
+	pad_time_with_zeroes(&minTime)
+	pad_time_with_zeroes(&secTime)
 	totalTime = minTime + ":" + secTime
 
 	// tty calculation
@@ -218,17 +309,35 @@ func main(){
 	    tty += "?"
         }
 
-	if major_tty_str != "0" {
+	if tty != "?" || major_tty_str != "0" {
             tty += major_tty_str
         }
 
 	// %CPU calc
 	procStartTimeTicks,err := strconv.ParseFloat(statContents[startTimeIndex], 64)
-	procStartTimeSecs := sysUptimeSecs - (procStartTimeTicks / 100.0)
-	cpuPercentage := ((float64(userTime) + float64(systemTime)) / procStartTimeSecs)
+	procRunTimeSecs := sysUptimeSecs - (procStartTimeTicks / 100.0)
+	cpuPercentage := ((float64(userTime) + float64(systemTime)) / procRunTimeSecs)
 
 	// get command
 	cmdline = get_command(PID, statContents[fNameIndex])
+
+	// get startTime
+        timeStarted := float64(curTime) - procRunTimeSecs
+	if timeStarted > 0 {
+	    mins := timeStarted / 60
+	    hourStr := strconv.Itoa((int(mins / 60)))
+            minStr := strconv.Itoa(int(mins) % 60)
+	    pad_time_with_zeroes(&hourStr)
+	    pad_time_with_zeroes(&minStr)
+            startTime = hourStr + ":" + minStr
+	} else {
+	    daysBack := int(timeStarted / -86400) + 1
+	    fmt.Println(daysBack)
+            for i:= 0; i < daysBack; i++ {
+	        dec_day(&curMonth, &curDay)
+            }
+	    startTime = curMonth + strconv.Itoa(curDay)
+	}
 
 	// TODO: rewrite use info from /proc/PID/stat instead of /proc/PID/status
 	status, err := os.Open("/proc/" + PID + "/status")
@@ -255,7 +364,7 @@ func main(){
         memUse = (rss / totalMem) * 100
 
         fmt.Fprintf(w, "%s\t%s\t%.1f\t%.1f\t%.0f\t%.0f\t%s\t%s\t%s\t%s\t%s\t\n",
-                    user, PID, cpuPercentage, memUse, vsz, rss, tty, state, "", totalTime, cmdline)
+                    user, PID, cpuPercentage, memUse, vsz, rss, tty, state, startTime, totalTime, cmdline)
         statContents = nil
     }
 }
