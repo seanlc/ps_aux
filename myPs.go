@@ -274,7 +274,6 @@ func get_start_time(curTime int, procRunTimeSecs float64,
 	startTime = hourStr + ":" + minStr
     } else {
 	daysBack := int(timeStarted / -86400) + 1
-	fmt.Println(daysBack)
         for i:= 0; i < daysBack; i++ {
 	    dec_day(curMonth, curDay)
         }
@@ -297,6 +296,8 @@ func main(){
     const stimeIndex = 14
     const startTimeIndex = 21
     const fNameIndex = 1
+    const vmIndex = 22
+    const rssIndex = 23
     parse_stat("1", &statContents)
 
     // tab writer
@@ -371,7 +372,15 @@ func main(){
 	// get startTime
 	startTime = get_start_time(curTime, procRunTimeSecs, &curMonth, &curDay)
 
-	// TODO: rewrite use info from /proc/PID/stat instead of /proc/PID/status
+        // get RSS
+        rss,err = strconv.ParseFloat(statContents[rssIndex], 64)
+	check(err)
+	rss = rss * 4
+
+	// could be made faster by getting VMSize from /proc/PID/stat as well,
+	// but the value differs slightly from that shown in ps aux output
+
+	// get user and VMSize from /proc/PID/status
 	status, err := os.Open("/proc/" + PID + "/status")
 	defer status.Close()
 	check(err)
@@ -385,11 +394,7 @@ func main(){
 		words := strings.Fields(inputLine)
 		vsz, err = strconv.ParseFloat(words[1], 64)
 		check(err)
-	    }
-	    if strings.HasPrefix(inputLine, "VmRSS:") {
-	        words := strings.Fields(inputLine)
-                rss, err = strconv.ParseFloat(words[1], 64)
-		check(err)
+		break
 	    }
 	}
 
