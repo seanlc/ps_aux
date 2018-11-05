@@ -210,6 +210,79 @@ func pad_time_with_zeroes(num *string) {
     }
 }
 
+func get_total_time(statContents []string, utimeIndex int, stimeIndex int,
+                    procExeTime *int, userTime *int, systemTime *int) string {
+    var err error
+    *userTime,err = strconv.Atoi(statContents[utimeIndex])
+    check(err)
+    *systemTime,err = strconv.Atoi(statContents[stimeIndex])
+    check(err)
+    *procExeTime = (*userTime + *systemTime) / 100
+    minTimeInt := *procExeTime / 60
+    secTimeInt := *procExeTime % 60
+    minTime := strconv.Itoa(minTimeInt)
+    secTime := strconv.Itoa(secTimeInt)
+    pad_time_with_zeroes(&minTime)
+    pad_time_with_zeroes(&secTime)
+    totalTime := minTime + ":" + secTime
+    return totalTime
+}
+
+func get_tty (statContents []string, ttyIndex int) string {
+    tty := ""
+    i64,err := strconv.ParseInt(statContents[ttyIndex], 10, 32)
+    check(err)
+    minor_tty := (int32(i64) >> 8) & 0xFF
+    major_tty1 := (int32(i64) >> 12) & 0xFFF00
+    major_tty0 := int32(i64) & 0xFF
+    major_tty := major_tty1 + major_tty0
+    major_tty_str := strconv.Itoa(int(major_tty))
+
+    if minor_tty == 136 {
+	tty += "pts/"
+    } else if minor_tty == 4 {
+        tty += "tty"
+    } else {
+	tty += "?"
+    }
+
+    if tty != "?" || major_tty_str != "0" {
+        tty += major_tty_str
+    }
+    return tty
+}
+
+func get_cpu_percentage(statContents []string, startTimeIndex int, sysUptimeSecs float64,
+                        userTime int, systemTime int, procRunTimeSecs *float64) float64 {
+    procStartTimeTicks,err := strconv.ParseFloat(statContents[startTimeIndex], 64)
+    check(err)
+    *procRunTimeSecs = sysUptimeSecs - (procStartTimeTicks / 100.0)
+    cpuPercentage := ((float64(userTime) + float64(systemTime)) / *procRunTimeSecs)
+    return cpuPercentage
+}
+
+func get_start_time(curTime int, procRunTimeSecs float64,
+                    curMonth *string, curDay *int) string {
+    startTime := ""
+    timeStarted := float64(curTime) - procRunTimeSecs
+    if timeStarted > 0 {
+	mins := timeStarted / 60
+	hourStr := strconv.Itoa((int(mins / 60)))
+        minStr := strconv.Itoa(int(mins) % 60)
+	pad_time_with_zeroes(&hourStr)
+	pad_time_with_zeroes(&minStr)
+	startTime = hourStr + ":" + minStr
+    } else {
+	daysBack := int(timeStarted / -86400) + 1
+	fmt.Println(daysBack)
+        for i:= 0; i < daysBack; i++ {
+	    dec_day(curMonth, curDay)
+        }
+	startTime = *curMonth + strconv.Itoa(*curDay)
+    }
+    return startTime
+}
+
 func main(){
     // slices for storing /proc PID dirs
     procDir := make([]int64,0)
@@ -263,15 +336,16 @@ func main(){
     for _, PID := range(procStr) {
 	user := ""
 	state := ""
-	major_tty_str := ""
 	tty := ""
 	vsz := 0.0
 	rss := 0.0
 	memUse := 0.0
-	totalTime := ""
 	procExeTime := 0
 	cmdline := ""
 	startTime := ""
+	userTime := 0
+	systemTime := 0
+	procRunTimeSecs := 0.0
 	curDay := origCurDay
 	curMonth := origCurMonth
 
@@ -281,63 +355,21 @@ func main(){
 	state = statContents[stateIndex]
 
 	// time calculation
-	userTime,err := strconv.Atoi(statContents[utimeIndex])
-	systemTime,err := strconv.Atoi(statContents[stimeIndex])
-	procExeTime = (userTime + systemTime) / 100
-	minTimeInt := procExeTime / 60
-	secTimeInt := procExeTime % 60
-	minTime := strconv.Itoa(minTimeInt)
-	secTime := strconv.Itoa(secTimeInt)
-	pad_time_with_zeroes(&minTime)
-	pad_time_with_zeroes(&secTime)
-	totalTime = minTime + ":" + secTime
+	totalTime := get_total_time(statContents, utimeIndex, stimeIndex,
+                                   &procExeTime, &userTime, &systemTime)
 
 	// tty calculation
-	i64,err := strconv.ParseInt(statContents[ttyIndex], 10, 32)
-	check(err)
-	minor_tty := (int32(i64) >> 8) & 0xFF
-	major_tty1 := (int32(i64) >> 12) & 0xFFF00
-	major_tty0 := int32(i64) & 0xFF
-	major_tty := major_tty1 + major_tty0
-	major_tty_str = strconv.Itoa(int(major_tty))
-
-	if minor_tty == 136 {
-	    tty += "pts/"
-	} else if minor_tty == 4 {
-            tty += "tty" 
-	} else {
-	    tty += "?"
-        }
-
-	if tty != "?" || major_tty_str != "0" {
-            tty += major_tty_str
-        }
+	tty = get_tty(statContents, ttyIndex)
 
 	// %CPU calc
-	procStartTimeTicks,err := strconv.ParseFloat(statContents[startTimeIndex], 64)
-	procRunTimeSecs := sysUptimeSecs - (procStartTimeTicks / 100.0)
-	cpuPercentage := ((float64(userTime) + float64(systemTime)) / procRunTimeSecs)
+	cpuPercentage := get_cpu_percentage(statContents, startTimeIndex, sysUptimeSecs,
+	                                    userTime, systemTime, &procRunTimeSecs)
 
 	// get command
 	cmdline = get_command(PID, statContents[fNameIndex])
 
 	// get startTime
-        timeStarted := float64(curTime) - procRunTimeSecs
-	if timeStarted > 0 {
-	    mins := timeStarted / 60
-	    hourStr := strconv.Itoa((int(mins / 60)))
-            minStr := strconv.Itoa(int(mins) % 60)
-	    pad_time_with_zeroes(&hourStr)
-	    pad_time_with_zeroes(&minStr)
-            startTime = hourStr + ":" + minStr
-	} else {
-	    daysBack := int(timeStarted / -86400) + 1
-	    fmt.Println(daysBack)
-            for i:= 0; i < daysBack; i++ {
-	        dec_day(&curMonth, &curDay)
-            }
-	    startTime = curMonth + strconv.Itoa(curDay)
-	}
+	startTime = get_start_time(curTime, procRunTimeSecs, &curMonth, &curDay)
 
 	// TODO: rewrite use info from /proc/PID/stat instead of /proc/PID/status
 	status, err := os.Open("/proc/" + PID + "/status")
